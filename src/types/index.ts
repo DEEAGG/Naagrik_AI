@@ -1,5 +1,17 @@
 export type ComplaintStatus = 'pending' | 'monitoring' | 'in_progress' | 'resolved';
 
+export type TrackingEventType = 'complaint_created' | 'reference_saved' | 'status_checked' | 'status_updated';
+
+export interface ComplaintTrackingEvent {
+  id: string;
+  complaintId: string;
+  userId?: string;
+  eventType: TrackingEventType;
+  status?: string;
+  note?: string;
+  createdAt: string;
+}
+
 export type IssueCategory =
   | 'Sanitation'
   | 'Street Lighting'

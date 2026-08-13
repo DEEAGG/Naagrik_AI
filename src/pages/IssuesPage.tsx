@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Pencil, Trash2, Check } from 'lucide-react';
+import { Plus, X, Pencil, Trash2, Check, Bookmark } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import CivicBackground from '@/components/CivicBackground';
 import ComplaintCard from '@/components/ComplaintCard';
 import { listComplaints, isUserCreatedComplaint, updateComplaint, deleteComplaint } from '@/services/complaintService';
+import { recordReferenceSaved } from '@/services/trackingService';
 import type { Complaint } from '@/types';
 
 export default function IssuesPage() {
@@ -17,6 +18,7 @@ export default function IssuesPage() {
   const [editDescription, setEditDescription] = useState('');
   const [editCategory, setEditCategory] = useState('');
   const [editLocation, setEditLocation] = useState('');
+  const [editReferenceNumber, setEditReferenceNumber] = useState('');
 
   const loadComplaints = useCallback(() => {
     listComplaints().then((c) => setComplaints(c));
@@ -32,16 +34,24 @@ export default function IssuesPage() {
     setEditDescription(complaint.description);
     setEditCategory(complaint.category);
     setEditLocation(complaint.location);
+    setEditReferenceNumber(complaint.referenceNumber || '');
   };
 
   const handleSaveEdit = async () => {
     if (!editingComplaint) return;
+
     await updateComplaint(editingComplaint.id, {
       title: editTitle,
       description: editDescription,
       category: editCategory,
       location: editLocation,
+      referenceNumber: editReferenceNumber.trim() || undefined,
     });
+
+    if (editReferenceNumber.trim() && editReferenceNumber.trim() !== editingComplaint.referenceNumber) {
+      await recordReferenceSaved(editingComplaint.id, editReferenceNumber.trim());
+    }
+
     setEditingComplaint(null);
     loadComplaints();
   };
@@ -54,7 +64,7 @@ export default function IssuesPage() {
   };
 
   return (
-    <div className="relative min-h-screen">
+    <div className="relative min-h-screen text-left">
       <CivicBackground />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
@@ -160,6 +170,17 @@ export default function IssuesPage() {
                     onChange={(e) => setEditDescription(e.target.value)}
                     rows={3}
                     className="mt-1 w-full resize-none rounded-xl bg-ink-800 border border-white/10 px-4 py-2.5 text-sm text-white leading-relaxed outline-none focus:border-accent-400/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold tracking-wider uppercase text-accent-300">Official Reference Number</label>
+                  <input
+                    type="text"
+                    value={editReferenceNumber}
+                    onChange={(e) => setEditReferenceNumber(e.target.value)}
+                    placeholder="e.g. DJB-2026-83192"
+                    className="mt-1 w-full rounded-xl bg-ink-800 border border-white/15 px-4 py-2.5 text-sm text-accent-300 font-mono outline-none focus:border-accent-400/40"
                   />
                 </div>
 

@@ -1,36 +1,55 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Clock, AlertTriangle, Sparkles, ArrowRight, X, ExternalLink, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Clock, AlertTriangle, Sparkles, ArrowRight, X, ShieldCheck } from 'lucide-react';
 import CivicBackground from '@/components/CivicBackground';
 import ComplaintJourney from '@/components/ComplaintJourney';
 import AgentStatus from '@/components/AgentStatus';
 import WorkflowProgress from '@/components/WorkflowProgress';
+import ComplaintTimeline from '@/components/ComplaintTimeline';
+import RecordStatusModal from '@/components/RecordStatusModal';
 import { getComplaint } from '@/services/complaintService';
 import { getAuthorityPortal } from '@/data/authorityPortals';
+import { getTrackingEvents, recordStatusCheck, recordStatusUpdate } from '@/services/trackingService';
 import { COMPLAINTS, STALLED_COMPLAINT } from '@/data/mockData';
-import type { Complaint } from '@/types';
+import type { Complaint, ComplaintTrackingEvent } from '@/types';
 
 export default function ComplaintTrackingPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [complaint, setComplaint] = useState<Complaint | null>(null);
-  const [showFollowup, setShowFollowup] = useState(false);
+  const [events, setEvents] = useState<ComplaintTrackingEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState<boolean>(true);
+  const [showFollowup, setShowFollowup] = useState<boolean>(false);
+
+  // Status Modal State
+  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [modalMode, setModalMode] = useState<'check' | 'record'>('check');
+
+  const loadData = useCallback(async () => {
+    if (!id) return;
+    const found =
+      (await getComplaint(id)) ||
+      COMPLAINTS.find((c) => c.id === id) ||
+      (id === STALLED_COMPLAINT.id ? STALLED_COMPLAINT : null);
+
+    if (found) {
+      setComplaint(found);
+      setLoadingEvents(true);
+      try {
+        const evts = await getTrackingEvents(found.id);
+        setEvents(evts);
+      } catch {
+        setEvents([]);
+      } finally {
+        setLoadingEvents(false);
+      }
+    }
+  }, [id]);
 
   useEffect(() => {
-    let active = true;
-    const load = async () => {
-      const found =
-        (await getComplaint(id || '')) ||
-        COMPLAINTS.find((c) => c.id === id) ||
-        (id === STALLED_COMPLAINT.id ? STALLED_COMPLAINT : null);
-      if (active && found) setComplaint(found);
-    };
-    load();
-    return () => {
-      active = false;
-    };
-  }, [id]);
+    loadData();
+  }, [loadData]);
 
   if (!complaint) {
     return (
@@ -47,6 +66,32 @@ export default function ComplaintTrackingPage() {
   const trackingUrl = complaint.authorityWebsite || portalConfig.statusUrl || portalConfig.complaintUrl;
   const officialRefNum = complaint.referenceNumber || complaint.id;
   const stalled = complaint.stalledDays && complaint.stalledDays >= 3;
+
+  const handleCheckOfficialStatus = async () => {
+    // 1. Open official portal in new secure tab
+    window.open(trackingUrl, '_blank', 'noopener,noreferrer');
+
+    // 2. Record status_checked event in Supabase
+    await recordStatusCheck(complaint.id);
+    await loadData();
+
+    // 3. Open modal explaining check and asking to record status
+    setModalMode('check');
+    setModalOpen(true);
+  };
+
+  const handleOpenUpdateModalDirectly = () => {
+    setModalMode('record');
+    setModalOpen(true);
+  };
+
+  const handleSaveStatus = async (status: string, note?: string) => {
+    await recordStatusUpdate(complaint.id, status, note);
+    await loadData();
+  };
+
+  const latestStatusEvt = events.find((e) => e.eventType === 'status_updated' && e.status);
+  const currentCitizenStatus = latestStatusEvt?.status || (complaint.referenceNumber ? 'In Progress' : 'Awaiting Reference');
 
   return (
     <div className="relative min-h-screen text-left">
@@ -79,7 +124,7 @@ export default function ComplaintTrackingPage() {
           </div>
           <span className="inline-flex items-center gap-2 rounded-full bg-accent-500/10 border border-accent-400/20 px-3.5 py-1.5 text-xs font-medium text-accent-300">
             <span className="h-2 w-2 rounded-full bg-accent-400 animate-breathe" />
-            Official Reference Saved
+            {complaint.referenceNumber ? 'Official Reference Saved' : 'Awaiting Reference'}
           </span>
         </div>
 
@@ -89,18 +134,18 @@ export default function ComplaintTrackingPage() {
         </div>
 
         {/* READY FOR OFFICIAL TRACKING CARD */}
-        <div className="mt-6 rounded-3xl glass p-6 sm:p-8 border border-accent-400/30 space-y-5">
+        <div className="mt-6 rounded-3xl glass p-6 sm:p-8 border border-accent-400/30 space-y-5 shadow-glow-soft">
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-accent-300" />
               <h2 className="text-lg font-semibold text-white uppercase tracking-wider">
-                READY FOR OFFICIAL TRACKING
+                OFFICIAL COMPLAINT TRACKING
               </h2>
             </div>
             <span className="text-xs text-gray-400 font-mono">{portalConfig.domain}</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="rounded-2xl bg-white/[0.03] p-4 border border-white/5 space-y-1">
               <span className="text-[11px] font-semibold tracking-wider uppercase text-gray-400 block">
                 Authority
@@ -116,6 +161,15 @@ export default function ComplaintTrackingPage() {
                 {officialRefNum}
               </span>
             </div>
+
+            <div className="rounded-2xl bg-white/[0.03] p-4 border border-white/5 space-y-1">
+              <span className="text-[11px] font-semibold tracking-wider uppercase text-gray-400 block">
+                Current Status
+              </span>
+              <span className="text-sm font-semibold text-accent-300">
+                {currentCitizenStatus}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-2">
@@ -123,15 +177,38 @@ export default function ComplaintTrackingPage() {
               Status is checked through the official authority. Naagrik AI does not fabricate or estimate complaint status.
             </p>
 
-            <a
-              href={trackingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-accent-500 to-accent-600 px-5 py-2.5 text-xs font-semibold text-white shadow-glow-soft hover:-translate-y-0.5 transition-all flex-none"
-            >
-              <span>Check Official Status ↗</span>
-            </a>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleCheckOfficialStatus}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-accent-500 to-accent-600 px-5 py-2.5 text-xs font-semibold text-white shadow-glow-soft hover:-translate-y-0.5 transition-all flex-none"
+              >
+                <span>Check Official Status ↗</span>
+              </button>
+              <button
+                onClick={handleOpenUpdateModalDirectly}
+                className="inline-flex items-center gap-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 px-4 py-2.5 text-xs font-medium text-white transition-all flex-none"
+              >
+                <span>Update Status</span>
+              </button>
+            </div>
           </div>
+        </div>
+
+        {/* TIMELINE SECTION */}
+        <div className="mt-8 rounded-3xl glass p-6 sm:p-8 space-y-6">
+          <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-accent-300" />
+              <h2 className="text-lg font-semibold text-white uppercase tracking-wider">
+                COMPLAINT TIMELINE
+              </h2>
+            </div>
+            <span className="text-xs text-gray-400 font-mono">
+              Persistent Cloud History
+            </span>
+          </div>
+
+          <ComplaintTimeline events={events} loading={loadingEvents} />
         </div>
 
         {/* Monitoring Info Grid */}
@@ -142,8 +219,15 @@ export default function ComplaintTrackingPage() {
             </div>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex justify-between">
-                <dt className="text-gray-400">Last verified</dt>
-                <dd className="text-gray-200">{complaint.lastChecked || 'Just now'}</dd>
+                <dt className="text-gray-400">Last checked by you</dt>
+                <dd className="text-gray-200">
+                  {events.find((e) => e.eventType === 'status_checked' || e.eventType === 'status_updated')
+                    ? new Date(
+                        events.find((e) => e.eventType === 'status_checked' || e.eventType === 'status_updated')!
+                          .createdAt
+                      ).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+                    : 'Not checked yet'}
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-400">Category</dt>
@@ -269,6 +353,18 @@ export default function ComplaintTrackingPage() {
           </>
         )}
       </AnimatePresence>
+
+      {/* Record Status Modal */}
+      <RecordStatusModal
+        isOpen={modalOpen}
+        mode={modalMode}
+        authorityName={complaint.authority}
+        referenceNumber={complaint.referenceNumber}
+        portalDomain={portalConfig.domain}
+        onClose={() => setModalOpen(false)}
+        onProceedToRecord={() => setModalMode('record')}
+        onSaveStatus={handleSaveStatus}
+      />
     </div>
   );
 }

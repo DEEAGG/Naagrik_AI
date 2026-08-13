@@ -126,7 +126,22 @@ export async function submitComplaint(payload: {
   const stored = getStoredComplaints();
   saveStoredComplaints([newComplaint, ...stored]);
 
+  // Record initial tracking events asynchronously
+  createInitialTrackingEvents(insertedId, payload.referenceNumber).catch(() => {});
+
   return { id: insertedId };
+}
+
+async function createInitialTrackingEvents(complaintId: string, referenceNumber?: string) {
+  try {
+    const { recordComplaintCreated, recordReferenceSaved } = await import('@/services/trackingService');
+    await recordComplaintCreated(complaintId);
+    if (referenceNumber) {
+      await recordReferenceSaved(complaintId, referenceNumber);
+    }
+  } catch {
+    // Ignore tracking record errors
+  }
 }
 
 /**
