@@ -43,36 +43,52 @@ export default function HomePage() {
       setStage('processing');
       setMultiIssueQueue(null);
       const initial = getProcessingSteps();
+      if (initial.length > 0) {
+        initial[0].status = 'active';
+      }
       setSteps(initial);
 
       const activeLoc = currentLocData || locationData;
 
-      // Start AI analysis immediately so network call runs concurrently
-      const analysisPromise = analyzeComplaint({
-        text: inputText,
-        evidenceCount: evidenceFiles.length,
-        userLocation: activeLoc.address,
-        userLocationData: activeLoc,
-      });
+      // Non-blocking background step indicator while waiting for AI network response
+      let isAIComplete = false;
+      const timer = setInterval(() => {
+        if (isAIComplete) return;
+        setSteps((prevSteps) => {
+          const next = prevSteps.map((s) => ({ ...s }));
+          const activeIndex = next.findIndex((s) => s.status === 'active');
+          if (activeIndex >= 0 && activeIndex < next.length - 1) {
+            next[activeIndex].status = 'done';
+            next[activeIndex + 1].status = 'active';
+          }
+          return next;
+        });
+      }, 250);
 
-      // Animate processing sequence smoothly in parallel
-      const currentSteps = initial.map((s) => ({ ...s }));
-      for (let i = 0; i < currentSteps.length; i++) {
-        currentSteps[i].status = 'active';
-        setSteps([...currentSteps]);
-        await new Promise((resolve) => setTimeout(resolve, 180));
-        currentSteps[i].status = 'done';
-        setSteps([...currentSteps]);
+      try {
+        // Execute AI analysis directly without artificial sequential blocking
+        const result = await analyzeComplaint({
+          text: inputText,
+          evidenceCount: evidenceFiles.length,
+          userLocation: activeLoc.address,
+          userLocationData: activeLoc,
+        });
+
+        isAIComplete = true;
+        clearInterval(timer);
+
+        // Mark all steps done and immediately transition to AnalysisView
+        setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
+        setAnalysis(result);
+        if (result.locationData) {
+          setLocationData(result.locationData);
+        }
+        setStage('analysis');
+      } catch (error) {
+        isAIComplete = true;
+        clearInterval(timer);
+        console.error('[Naagrik AI Pipeline] Analysis pipeline error:', error);
       }
-
-      // Wait for real AI analysis result
-      const result = await analysisPromise;
-
-      setAnalysis(result);
-      if (result.locationData) {
-        setLocationData(result.locationData);
-      }
-      setStage('analysis');
     },
     [evidenceFiles.length, locationData]
   );
