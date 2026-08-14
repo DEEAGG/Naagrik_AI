@@ -91,7 +91,11 @@ export default function ComplaintTrackingPage() {
   };
 
   const latestStatusEvt = events.find((e) => e.eventType === 'status_updated' && e.status);
-  const currentCitizenStatus = latestStatusEvt?.status || (complaint.referenceNumber ? 'In Progress' : 'Awaiting Reference');
+  const currentCitizenStatus = latestStatusEvt?.status
+    ? latestStatusEvt.status
+    : complaint.referenceNumber
+    ? 'Reference Added · Status Not Checked'
+    : 'Awaiting Official Reference';
 
   return (
     <div className="relative min-h-screen text-left">
@@ -124,7 +128,7 @@ export default function ComplaintTrackingPage() {
           </div>
           <span className="inline-flex items-center gap-2 rounded-full bg-accent-500/10 border border-accent-400/20 px-3.5 py-1.5 text-xs font-medium text-accent-300">
             <span className="h-2 w-2 rounded-full bg-accent-400 animate-breathe" />
-            {complaint.referenceNumber ? 'Official Reference Saved' : 'Awaiting Reference'}
+            {complaint.referenceNumber ? 'Official Reference Saved' : 'Awaiting Official Reference'}
           </span>
         </div>
 

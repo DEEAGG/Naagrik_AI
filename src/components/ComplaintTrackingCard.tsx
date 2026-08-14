@@ -37,16 +37,15 @@ function formatLastChecked(events: ComplaintTrackingEvent[]): string {
   return lastEvt.createdAt || 'Recently';
 }
 
-function getLatestStatusText(events: ComplaintTrackingEvent[], fallbackStatus: string): string {
+function getLatestStatusText(events: ComplaintTrackingEvent[], fallbackStatus: string, hasReference: boolean): string {
   const statusEvts = events.filter((e) => e.eventType === 'status_updated' && e.status);
   if (statusEvts.length > 0 && statusEvts[0].status) {
     return statusEvts[0].status;
   }
-  const checkedEvts = events.filter((e) => e.eventType === 'status_checked');
-  if (checkedEvts.length > 0) {
-    return 'Status Checked';
+  if (!hasReference) {
+    return 'Awaiting Official Reference';
   }
-  return fallbackStatus === 'in_progress' ? 'Not checked yet' : fallbackStatus;
+  return 'Reference Added · Status Not Checked';
 }
 
 export default function ComplaintTrackingCard({ complaint, onUpdate }: Props) {
@@ -102,7 +101,7 @@ export default function ComplaintTrackingCard({ complaint, onUpdate }: Props) {
   };
 
   const lastCheckedText = formatLastChecked(events);
-  const currentStatusText = getLatestStatusText(events, complaint.status);
+  const currentStatusText = getLatestStatusText(events, complaint.status, hasReference);
 
   return (
     <motion.div
