@@ -245,6 +245,12 @@ export default function ComplaintReview({
               Responsible Authority
             </span>
             <span className="text-sm font-semibold text-accent-300">{authority}</span>
+            {analysis.isVerifiedRouting && (
+              <span className="mt-1 flex items-center gap-1 text-[10px] font-medium text-emerald-400">
+                <ShieldCheck className="h-3 w-3 text-emerald-400" />
+                Verified Civic Routing
+              </span>
+            )}
           </div>
         </div>
 

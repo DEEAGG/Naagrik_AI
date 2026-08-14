@@ -136,6 +136,11 @@ export interface AnalysisResult {
   detectedIssues?: ComplaintDraft[];
   confidence?: 'high' | 'medium' | 'low';
   providerUsed?: string;
+  authorityKey?: string;
+  isVerifiedRouting?: boolean;
+  routingExplanation?: string;
+  matchedRuleId?: string;
+  suggestedAuthorities?: Array<{ key: string; name: string }>;
 }
 
 export interface AuthorityGroup {

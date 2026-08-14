@@ -147,15 +147,21 @@ export default function AnalysisView({
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.4 }}
-          className="mt-8 rounded-2xl glass p-6 text-left"
+          className="mt-8 rounded-2xl glass p-6 text-left border border-amber-400/30 bg-amber-500/5"
         >
           <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-accent-500/15 text-accent-300">
-              <HelpCircle className="h-5 w-5" />
+            <span className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-amber-500/20 text-amber-300">
+              <AlertCircle className="h-5 w-5" />
             </span>
-            <p className="text-sm text-gray-300 leading-relaxed pt-1 font-medium">
-              {analysis.clarificationQuestion}
-            </p>
+            <div>
+              <span className="text-xs font-bold text-amber-300 uppercase tracking-wider block">
+                Authority needs confirmation
+              </span>
+              <p className="text-sm text-gray-200 leading-relaxed pt-1 font-medium">
+                {analysis.clarificationQuestion ||
+                  'Road responsibility can depend on who maintains the road. Please confirm the responsible authority before continuing.'}
+              </p>
+            </div>
           </div>
 
           {/* Multiple choice clarification options */}
@@ -165,7 +171,7 @@ export default function AnalysisView({
                 <button
                   key={opt}
                   onClick={() => onSelectOption && onSelectOption(opt)}
-                  className="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-medium text-gray-200 hover:border-accent-400/40 hover:bg-accent-500/10 hover:text-white transition-all text-left"
+                  className="rounded-full border border-amber-400/30 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-100 hover:border-amber-400 hover:bg-amber-500/20 transition-all text-left"
                 >
                   {opt}
                 </button>
@@ -209,6 +215,26 @@ export default function AnalysisView({
               delay={0.26}
             />
           </div>
+
+          {/* VERIFIED ROUTING EXPLANATION BANNER */}
+          {analysis.isVerifiedRouting && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="mt-4 rounded-xl bg-accent-500/10 border border-accent-400/20 p-3.5 flex items-start gap-3 text-left"
+            >
+              <ShieldCheck className="h-4 w-4 text-accent-300 flex-none mt-0.5" />
+              <div>
+                <div className="text-xs font-semibold text-accent-300">
+                  Authority identified using verified civic routing
+                </div>
+                <p className="text-[11px] text-gray-300 mt-0.5 leading-relaxed">
+                  Naagrik AI understands your complaint with AI, then cross-checks the responsible authority against verified civic routing rules.
+                </p>
+              </div>
+            </motion.div>
+          )}
 
           {/* DEDICATED LOCATION SECTION */}
           <motion.div

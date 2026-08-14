@@ -1,5 +1,7 @@
-import type { AnalysisResult, ComplaintDraft, IssueCategory, LocationData } from '@/types';
-import { resolveLocationPriority } from '@/services/locationService';
+import type { AnalysisResult, ComplaintDraft, IssueCategory, LocationData } from '../types';
+import { resolveLocationPriority } from './locationService';
+import { resolveCivicAuthority } from './civicRoutingService';
+import { getAuthorityPortal } from '../data/authorityPortals';
 
 export interface AnalyzeInput {
   text: string;
@@ -459,12 +461,22 @@ export class FallbackAIProvider implements AIProvider {
       };
     }
 
-    // 5. Authority & Official Website Determination
-    const authInfo = this.authorityResolver.resolve(parsed.category, parsed.issueTitle, activeLocationData.address, parsed.authorityKey);
+    // 5. Verified Civic Routing Determination
+    const routingResult = resolveCivicAuthority({
+      issueTitle: parsed.issueTitle,
+      category: parsed.category,
+      description: sanitizedDesc,
+      rawText: rawText,
+      authorityKey: parsed.authorityKey,
+    });
+
+    const portal = getAuthorityPortal(routingResult.authorityKey);
+    const resolvedCategory = (routingResult.category || parsed.category) as IssueCategory;
     const isLocationMissing = activeLocationData.source === 'unspecified' || activeLocationData.address === 'Location Not Specified';
+    const needsClarification = routingResult.needsConfirmation;
 
     const letter = generateOfficialComplaintLetter({
-      authority: authInfo.authority,
+      authority: routingResult.authorityName,
       issueTitle: parsed.issueTitle,
       location: activeLocationData.address,
       description: sanitizedDesc,
@@ -473,24 +485,32 @@ export class FallbackAIProvider implements AIProvider {
     return {
       issueTitle: parsed.issueTitle,
       issue: parsed.issueTitle,
-      category: parsed.category,
+      category: resolvedCategory,
       subcategory: parsed.subcategory,
-      authority: authInfo.authority,
-      authorityWebsite: authInfo.website,
+      authority: routingResult.authorityName,
+      authorityKey: routingResult.authorityKey,
+      authorityWebsite: portal.complaintUrl,
       location: activeLocationData.address,
       locationData: activeLocationData,
       description: sanitizedDesc,
       complaintLetter: letter,
-      status: 'sufficient',
-      isSufficient: true,
-      needsClarification: false,
+      status: needsClarification ? 'needs_clarification' : 'sufficient',
+      isSufficient: !needsClarification,
+      needsClarification: needsClarification,
       isOptionalEnhancement: isLocationMissing,
       missingOptionalDetails: isLocationMissing ? ['Locality / Address', 'Nearby Landmark'] : [],
-      suggestedOptions: isLocationMissing
+      clarificationQuestion: needsClarification ? routingResult.explanation : undefined,
+      suggestedOptions: needsClarification && routingResult.suggestedAuthorities
+        ? routingResult.suggestedAuthorities.map((a) => a.name)
+        : isLocationMissing
         ? ['Use my current location', 'Enter location manually', 'Choose saved location']
         : undefined,
-      confidence: 'high',
+      confidence: routingResult.confidence,
       providerUsed: this.name,
+      routingExplanation: routingResult.explanation,
+      isVerifiedRouting: routingResult.isVerifiedRouting,
+      matchedRuleId: routingResult.matchedRule,
+      suggestedAuthorities: routingResult.suggestedAuthorities,
     };
   }
 
@@ -506,20 +526,27 @@ export class FallbackAIProvider implements AIProvider {
     const drafts: ComplaintDraft[] = parts.map((part, idx) => {
       const parsed = this.parseProblem(part, part.toLowerCase());
       const sanitizedDesc = sanitizeHinglishLeaks(parsed.professionalDescription);
-      const auth = this.authorityResolver.resolve(parsed.category, parsed.issueTitle, undefined, parsed.authorityKey);
+      const routing = resolveCivicAuthority({
+        issueTitle: parsed.issueTitle,
+        category: parsed.category,
+        description: sanitizedDesc,
+        rawText: part,
+        authorityKey: parsed.authorityKey,
+      });
+      const portal = getAuthorityPortal(routing.authorityKey);
       return {
         id: `draft-${idx + 1}`,
         title: parsed.issueTitle,
         description: sanitizedDesc,
         complaintLetter: generateOfficialComplaintLetter({
-          authority: auth.authority,
+          authority: routing.authorityName,
           issueTitle: parsed.issueTitle,
           location: 'Location Not Specified',
           description: sanitizedDesc,
         }),
-        category: parsed.category,
-        authority: auth.authority,
-        authorityWebsite: auth.website,
+        category: routing.category || parsed.category,
+        authority: routing.authorityName,
+        authorityWebsite: portal.complaintUrl,
         location: 'Location Not Specified',
       };
     });
@@ -893,45 +920,24 @@ Return ONLY a single valid JSON object (no markdown, no backticks):
         };
       }
 
-      const authInfo = this.authorityResolver.resolve(
-        parsed.category || '',
-        parsed.issueTitle || '',
-        activeLocationData.address,
-        parsed.authorityKey
-      );
-
       const sanitizedDesc = sanitizeHinglishLeaks(parsed.description || input.text);
 
-      if (parsed.needsClarification) {
-        const result: AnalysisResult = {
-          issueTitle: parsed.issueTitle || 'Civic Issue',
-          issue: parsed.issueTitle || 'Civic Issue',
-          category: parsed.category || 'General Civic Issue',
-          authority: authInfo.authority,
-          authorityWebsite: authInfo.website,
-          location: activeLocationData.address,
-          locationData: activeLocationData,
-          description: sanitizedDesc,
-          status: 'needs_clarification',
-          isSufficient: false,
-          needsClarification: true,
-          clarificationQuestion: parsed.clarificationQuestion || 'Could you provide a few more details about the issue?',
-          suggestedOptions: parsed.clarificationOptions || parsed.suggestedOptions || [],
-          confidence: parsed.confidence || 'low',
-          providerUsed: this.name,
-        };
+      const routingResult = resolveCivicAuthority({
+        issueTitle: parsed.issueTitle,
+        category: parsed.category,
+        description: sanitizedDesc,
+        rawText: input.text,
+        authorityKey: parsed.authorityKey,
+      });
 
-        if (import.meta.env.DEV) {
-          console.log('[Naagrik AI Pipeline] Provider: GeminiAIProvider | Model:', this.model, '| Output:', result);
-        }
-        return result;
-      }
-
+      const portal = getAuthorityPortal(routingResult.authorityKey);
+      const resolvedCategory = (routingResult.category || parsed.category || 'General Civic Issue') as IssueCategory;
       const isLocationMissing =
         activeLocationData.source === 'unspecified' || activeLocationData.address === 'Location Not Specified';
+      const needsClarification = Boolean(parsed.needsClarification || routingResult.needsConfirmation);
 
       const letter = generateOfficialComplaintLetter({
-        authority: authInfo.authority,
+        authority: routingResult.authorityName,
         issueTitle: parsed.issueTitle || 'Civic Issue',
         location: activeLocationData.address,
         description: sanitizedDesc,
@@ -940,23 +946,33 @@ Return ONLY a single valid JSON object (no markdown, no backticks):
       const result: AnalysisResult = {
         issueTitle: parsed.issueTitle || 'Civic Issue',
         issue: parsed.issueTitle || 'Civic Issue',
-        category: parsed.category || 'General Civic Issue',
-        authority: authInfo.authority,
-        authorityWebsite: authInfo.website,
+        category: resolvedCategory,
+        authority: routingResult.authorityName,
+        authorityKey: routingResult.authorityKey,
+        authorityWebsite: portal.complaintUrl,
         location: activeLocationData.address,
         locationData: activeLocationData,
         description: sanitizedDesc,
         complaintLetter: letter,
-        status: 'sufficient',
-        isSufficient: true,
-        needsClarification: false,
+        status: needsClarification ? 'needs_clarification' : 'sufficient',
+        isSufficient: !needsClarification,
+        needsClarification: needsClarification,
         isOptionalEnhancement: isLocationMissing,
         missingOptionalDetails: isLocationMissing ? ['Locality / Address', 'Nearby Landmark'] : [],
-        suggestedOptions: isLocationMissing
-          ? ['Use my current location', 'Enter location manually', 'Choose saved location']
-          : undefined,
-        confidence: parsed.confidence || 'high',
+        clarificationQuestion: routingResult.needsConfirmation
+          ? routingResult.explanation
+          : parsed.clarificationQuestion || 'Could you provide a few more details about the issue?',
+        suggestedOptions: routingResult.needsConfirmation && routingResult.suggestedAuthorities
+          ? routingResult.suggestedAuthorities.map((a) => a.name)
+          : parsed.clarificationOptions || parsed.suggestedOptions || (isLocationMissing
+              ? ['Use my current location', 'Enter location manually', 'Choose saved location']
+              : undefined),
+        confidence: routingResult.confidence,
         providerUsed: this.name,
+        routingExplanation: routingResult.explanation,
+        isVerifiedRouting: routingResult.isVerifiedRouting,
+        matchedRuleId: routingResult.matchedRule,
+        suggestedAuthorities: routingResult.suggestedAuthorities,
       };
 
       if (import.meta.env.DEV) {

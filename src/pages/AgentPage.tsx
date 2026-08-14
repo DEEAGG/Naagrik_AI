@@ -43,7 +43,7 @@ export default function AgentPage() {
               Agent Activity & Tracking
             </h1>
             <p className="mt-2 text-sm text-gray-400">
-              Naagrik AI helps you maintain and log your official grievance status history across government portals.
+              Naagrik AI understands your complaint using AI, then cross-checks the responsible authority using verified civic routing rules before preparing your complaint.
             </p>
           </div>
           <AgentStatus label="Agent Standby" />
