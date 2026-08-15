@@ -13,7 +13,7 @@ interface Props {
   onReview: () => void;
   onLocationDataSelected: (locData: LocationData) => void;
   onAnswerClarification?: (answer: string) => void;
-  onSelectOption?: (option: string) => void;
+  onSelectOption?: (option: string, extraDetail?: string) => void;
   onSelectMultiIssueMode?: (mode: 'split' | 'combine') => void;
 }
 
@@ -170,7 +170,7 @@ export default function AnalysisView({
               {analysis.suggestedOptions.map((opt) => (
                 <button
                   key={opt}
-                  onClick={() => onSelectOption && onSelectOption(opt)}
+                  onClick={() => onSelectOption && onSelectOption(opt, customAnswer)}
                   className="rounded-full border border-amber-400/30 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-100 hover:border-amber-400 hover:bg-amber-500/20 transition-all text-left"
                 >
                   {opt}

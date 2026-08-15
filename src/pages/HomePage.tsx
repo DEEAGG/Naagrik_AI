@@ -12,7 +12,8 @@ import AgentExecutionTimeline from '@/components/AgentExecutionTimeline';
 import SuccessView from '@/components/SuccessView';
 import { runProcessing, analyzeComplaint, getProcessingSteps } from '@/services/agentService';
 import { submitComplaint } from '@/services/complaintService';
-import { generateOfficialComplaintLetter, generateCombinedComplaintLetter, groupIssuesByAuthority } from '@/services/aiService';
+import { generateOfficialComplaintLetter, generateCombinedComplaintLetter, groupIssuesByAuthority, sanitizeHinglishLeaks } from '@/services/aiService';
+import { getAuthorityPortal } from '@/data/authorityPortals';
 import { AGENT_PLAN } from '@/data/mockData';
 import type { AnalysisResult, ProcessingStep, LocationData, MultiIssueQueueState } from '@/types';
 
@@ -39,7 +40,7 @@ export default function HomePage() {
   const [complaintId, setComplaintId] = useState('');
 
   const runAnalysisPipeline = useCallback(
-    async (inputText: string, currentLocData?: LocationData) => {
+    async (inputText: string, currentLocData?: LocationData, isClarificationRetry = false) => {
       setStage('processing');
       setMultiIssueQueue(null);
       const initial = getProcessingSteps();
@@ -77,13 +78,18 @@ export default function HomePage() {
         isAIComplete = true;
         clearInterval(timer);
 
-        // Mark all steps done and immediately transition to AnalysisView
+        // Mark all steps done and immediately transition
         setSteps((prev) => prev.map((s) => ({ ...s, status: 'done' })));
         setAnalysis(result);
         if (result.locationData) {
           setLocationData(result.locationData);
         }
-        setStage('analysis');
+
+        if (isClarificationRetry && !result.needsClarification) {
+          setStage('review');
+        } else {
+          setStage('analysis');
+        }
       } catch (error) {
         isAIComplete = true;
         clearInterval(timer);
@@ -131,22 +137,129 @@ export default function HomePage() {
     setEvidenceFiles(files);
   }, []);
 
-  const handleAnswerClarification = useCallback(
-    (answer: string) => {
-      const updatedText = `${text} (Additional detail: ${answer})`;
-      setText(updatedText);
-      runAnalysisPipeline(updatedText);
+  const handleSelectOption = useCallback(
+    (option: string, extraDetail?: string) => {
+      // 1. Resolve authority key and name from selected option or analysis.suggestedAuthorities
+      let authorityKey = '';
+      let authorityName = '';
+
+      if (analysis.suggestedAuthorities && analysis.suggestedAuthorities.length > 0) {
+        const matched = analysis.suggestedAuthorities.find(
+          (a) =>
+            a.name.toLowerCase() === option.toLowerCase() ||
+            a.key.toLowerCase() === option.toLowerCase() ||
+            option.toLowerCase().includes(a.name.toLowerCase()) ||
+            option.toLowerCase().includes(a.key.toLowerCase())
+        );
+        if (matched) {
+          authorityKey = matched.key;
+          authorityName = matched.name;
+        }
+      }
+
+      if (!authorityKey) {
+        const portal = getAuthorityPortal(undefined, option);
+        authorityKey = portal.authorityKey;
+        authorityName = portal.authority;
+      }
+
+      const portal = getAuthorityPortal(authorityKey, authorityName);
+      const activeLoc = analysis.locationData || locationData;
+      const issueTitle = analysis.issueTitle || analysis.issue || 'Civic Issue';
+
+      // 2. Preserve description & incorporate extraDetail if provided (Case 3)
+      let finalDesc = analysis.description || text;
+      if (extraDetail && extraDetail.trim()) {
+        finalDesc = `${finalDesc}. Additional detail: ${extraDetail.trim()}`;
+      }
+      finalDesc = sanitizeHinglishLeaks(finalDesc);
+
+      // 3. Generate official complaint letter with confirmed authority & updated description
+      const letter = generateOfficialComplaintLetter({
+        authority: portal.authority,
+        issueTitle,
+        location: activeLoc.address,
+        description: finalDesc,
+      });
+
+      // 4. Construct final AnalysisResult with needsClarification = false & transition to Review stage
+      const updatedAnalysis: AnalysisResult = {
+        ...analysis,
+        authority: portal.authority,
+        authorityKey: portal.authorityKey,
+        authorityWebsite: portal.complaintUrl,
+        description: finalDesc,
+        complaintLetter: letter,
+        status: 'sufficient',
+        isSufficient: true,
+        needsClarification: false,
+        clarificationQuestion: undefined,
+        suggestedOptions: undefined,
+        isVerifiedRouting: false,
+        routingExplanation: `Authority confirmed by citizen: ${portal.authority}.`,
+      };
+
+      setAnalysis(updatedAnalysis);
+      setStage('review');
     },
-    [text, runAnalysisPipeline]
+    [analysis, locationData, text]
   );
 
-  const handleSelectOption = useCallback(
-    (option: string) => {
-      const updatedText = `${text} (${option})`;
+  const handleAnswerClarification = useCallback(
+    (answer: string) => {
+      const trimmed = answer.trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+
+      // Check if typed text is strictly an authority selection
+      let selectedAuthorityKey: string | undefined;
+      let selectedAuthorityName: string | undefined;
+
+      if (analysis.suggestedAuthorities && analysis.suggestedAuthorities.length > 0) {
+        const matched = analysis.suggestedAuthorities.find(
+          (a) =>
+            a.name.toLowerCase() === lower ||
+            a.key.toLowerCase() === lower ||
+            lower.includes(a.name.toLowerCase()) ||
+            lower.includes(a.key.toLowerCase())
+        );
+        if (matched) {
+          selectedAuthorityKey = matched.key;
+          selectedAuthorityName = matched.name;
+        }
+      }
+
+      if (!selectedAuthorityKey) {
+        if (lower === 'pwd' || lower.includes('public works department')) {
+          selectedAuthorityKey = 'pwd';
+        } else if (lower === 'mcd' || lower.includes('municipal corporation of delhi')) {
+          selectedAuthorityKey = 'mcd';
+        } else if (lower === 'nhai' || lower.includes('national highways authority')) {
+          selectedAuthorityKey = 'nhai';
+        } else if (lower === 'djb' || lower.includes('delhi jal board')) {
+          selectedAuthorityKey = 'djb';
+        } else if (lower === 'bses' || lower.includes('bses yamuna') || lower.includes('bses rajdhani')) {
+          selectedAuthorityKey = 'bses';
+        } else if (lower === 'traffic' || lower.includes('traffic police')) {
+          selectedAuthorityKey = 'traffic_police';
+        } else if (lower === 'dda' || lower.includes('delhi development authority')) {
+          selectedAuthorityKey = 'dda';
+        }
+        if (selectedAuthorityKey) {
+          selectedAuthorityName = getAuthorityPortal(selectedAuthorityKey).authority;
+        }
+      }
+
+      if (selectedAuthorityName || selectedAuthorityKey) {
+        handleSelectOption(selectedAuthorityName || selectedAuthorityKey || trimmed);
+        return;
+      }
+
+      const updatedText = `${text} (Additional detail: ${trimmed})`;
       setText(updatedText);
-      runAnalysisPipeline(updatedText);
+      runAnalysisPipeline(updatedText, undefined, true);
     },
-    [text, runAnalysisPipeline]
+    [analysis.suggestedAuthorities, handleSelectOption, text, runAnalysisPipeline]
   );
 
   const handleSelectMultiIssueMode = useCallback(
